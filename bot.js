@@ -114,6 +114,8 @@ function startBot() {
         port: PORT_MC,
         username: BOT_NAME,
         offline: true,
+        skipPing: true,
+        version: '1.21.36',
         connectTimeout: 30000,
         skinData: generateWhiteDuckSkin()
     });
