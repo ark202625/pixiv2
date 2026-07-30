@@ -115,7 +115,8 @@ function startBot() {
         username: BOT_NAME,
         offline: true,
         skipPing: true,
-        version: '1.21.36',
+        version: '1.20.40',          // Aligned with installed bedrock-protocol package limit
+        raknetBackend: 'jsp-raknet', // Fixes C++ build failures on Render/Termux
         connectTimeout: 30000,
         skinData: generateWhiteDuckSkin()
     });
