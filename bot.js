@@ -107,16 +107,36 @@ function savePermanentCommands(permMap) {
 
 // --- BOT STARTUP & LOGIC ---
 function startBot() {
-    console.log(`Connecting Bedrock bot '${BOT_NAME}' to ${HOST}:${PORT_MC}...`);
+    console.log(`\n--------------------------------------------------`);
+    console.log(`[Attempting Connection] Target: ${HOST}:${PORT_MC}`);
+    console.log(`[Bot Name]: ${BOT_NAME}`);
+    console.log(`--------------------------------------------------\n`);
 
+    // Ping server first to resolve protocol and check online status
+    bedrock.ping({ host: HOST, port: PORT_MC })
+        .then((pingResult) => {
+            console.log(`[Ping Success] Server MOTD: ${pingResult.motd}`);
+            console.log(`[Ping Success] Protocol Version: ${pingResult.version}`);
+            
+            connectClient();
+        })
+        .catch((err) => {
+            console.error(`[Ping Failed] Could not reach ${HOST}:${PORT_MC}.`);
+            console.error(`Make sure your Aternos server is ONLINE (Green) in your dashboard.`);
+            console.error(`Error details: ${err.message}`);
+            console.log(`Retrying ping in 15 seconds...`);
+            setTimeout(startBot, 15000);
+        });
+}
+
+function connectClient() {
     const client = bedrock.createClient({
         host: HOST,
         port: PORT_MC,
         username: BOT_NAME,
         offline: true,
-        skipPing: true,
-        version: '1.20.40',          // Aligned with installed bedrock-protocol package limit
-        raknetBackend: 'jsp-raknet', // Fixes C++ build failures on Render/Termux
+        skipPing: false,            // Resolves server protocol/version automatically
+        raknetBackend: 'jsp-raknet', // Matches pure JS backend setup
         connectTimeout: 30000,
         skinData: generateWhiteDuckSkin()
     });
@@ -127,7 +147,7 @@ function startBot() {
     });
 
     client.on('join', () => {
-        console.log("Successfully joined the world.");
+        console.log(`Successfully joined the world.`);
     });
 
     client.on('disconnect', (packet) => {
@@ -146,7 +166,7 @@ function startBot() {
     let isSneaking = false;
 
     client.on('spawn', () => {
-        console.log(`[+] ${BOT_NAME} connected!`);
+        console.log(`🎉 [+] ${BOT_NAME} connected and spawned! 🎉`);
         sendChat(client, `${BOT_NAME} online! Type '*${BOT_NAME} guide1' for help.`);
     });
 
@@ -413,11 +433,11 @@ function startBot() {
         console.error("==================");
     });
 
-    client.on('close', (reason) => {
+    client.on('end', (reason) => {
         stopAll();
         console.log("Connection closed:", reason);
-        console.log("Reconnecting in 10 seconds...");
-        setTimeout(startBot, 10000);
+        console.log("Reconnecting in 15 seconds...");
+        setTimeout(startBot, 15000);
     });
 }
 
@@ -428,4 +448,5 @@ function sendChat(client, text) {
     });
 }
 
+// Start the bot loop
 startBot();
