@@ -16,7 +16,7 @@ app.listen(PORT, () => {
 });
 
 // Target Server Config
-const HOST = process.env.MC_HOST || 'bigscale.aternos.host';
+const HOST = process.env.MC_HOST || 'cuis.aternos.host';
 const PORT_MC = parseInt(process.env.MC_PORT) || 43180;
 const BOT_NAME = process.env.MC_USERNAME || 'pixi'; 
 
