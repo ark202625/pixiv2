@@ -1,4 +1,3 @@
-
 const bedrock = require('bedrock-protocol');
 const fs = require('fs');
 const path = require('path');
@@ -115,9 +114,21 @@ function startBot() {
         port: PORT_MC,
         username: BOT_NAME,
         offline: true,
-        skipPing: true,
-        raknetBackend: 'jsp-raknet',
+        connectTimeout: 30000,
         skinData: generateWhiteDuckSkin()
+    });
+
+    // Lifecycle Events
+    client.on('connect', () => {
+        console.log("RakNet connected.");
+    });
+
+    client.on('join', () => {
+        console.log("Successfully joined the world.");
+    });
+
+    client.on('disconnect', (packet) => {
+        console.log("Disconnect packet:", packet);
     });
 
     // Storage Maps
@@ -393,11 +404,17 @@ function startBot() {
         isSneaking = false;
     }
 
-    client.on('error', (e) => console.error(`[-] Network Error: ${e.message}`));
-    client.on('close', () => {
+    client.on('error', (e) => {
+        console.error("=== FULL ERROR ===");
+        console.error(e);
+        console.error("==================");
+    });
+
+    client.on('close', (reason) => {
         stopAll();
-        console.log('[-] Disconnected. Reconnecting in 10s...');
-        setTimeout(() => startBot(), 10000);
+        console.log("Connection closed:", reason);
+        console.log("Reconnecting in 10 seconds...");
+        setTimeout(startBot, 10000);
     });
 }
 
