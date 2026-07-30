@@ -11,7 +11,7 @@
     "start": "node bot.js"
   },
   "dependencies": {
-    "bedrock-protocol": "^latest",
+    "bedrock-protocol": "latest",
     "express": "^4.21.2"
   }
 }
