@@ -16,7 +16,7 @@ app.listen(PORT, () => {
 });
 
 // Target Server Config
-const HOST = process.env.MC_HOST || 'piximc.aternos.me';
+const HOST = process.env.MC_HOST || 'icefish.aternos.host';
 const PORT_MC = parseInt(process.env.MC_PORT) || 43180;
 const BOT_NAME = process.env.MC_USERNAME || 'pixi'; 
 
