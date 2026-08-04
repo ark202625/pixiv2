@@ -15,11 +15,16 @@ app.listen(PORT_WEB, () => {
     console.log(`[Web Server] Listening on port ${PORT_WEB} for health checks.`);
 });
 
-// --- 2. CONFIGURATION & FAILSAFES ---
+// --- 2. CONFIGURATION & FALLBACKS ---
 const HOST = process.env.MC_HOST || 'piximc.aternos.me';
-const PORT_MC = parseInt(process.env.MC_PORT) || 43180;
-const BOT_NAME = process.env.MC_USERNAME || 'pixi'; 
+const PRIMARY_PORT = parseInt(process.env.MC_PORT) || 43180;
+const BOT_NAME = process.env.MC_USERNAME || 'pixi';
+const TARGET_VERSION = '1.26.36.1'; // Target version matching server dashboard
 const STORAGE_FILE = path.join(__dirname, 'commands.json');
+
+// Fallback ports to check if the primary port fails (common Aternos port shifts)
+const FALLBACK_PORTS = [PRIMARY_PORT, 43181, 43179, 43029, 19132];
+let currentPortIndex = 0;
 
 let client = null;
 let isConnecting = false;
@@ -95,49 +100,56 @@ function startBot() {
     isConnecting = true;
     stopAll();
 
+    const currentPort = FALLBACK_PORTS[currentPortIndex];
+
     console.log(`\n--------------------------------------------------`);
-    console.log(`[Attempting Connection] Target: ${HOST}:${PORT_MC}`);
+    console.log(`[Attempting Connection] Target: ${HOST}:${currentPort}`);
+    console.log(`[Target Version]: ${TARGET_VERSION}`);
     console.log(`[Bot Name]: ${BOT_NAME}`);
     console.log(`--------------------------------------------------\n`);
 
-    // Dynamic Server Probe
-    bedrock.ping({ host: HOST, port: PORT_MC })
+    // Ping probe before joining
+    bedrock.ping({ host: HOST, port: currentPort, timeout: 5000 })
         .then((pingResult) => {
             console.log(`[Ping Success] Server MOTD: ${pingResult.motd}`);
-            console.log(`[Ping Success] Server Protocol Version: ${pingResult.version}`);
+            console.log(`[Ping Success] Server Protocol/Version: ${pingResult.version}`);
 
-            // Pass the EXACT version returned by the ping to resolve version mismatches automatically
-            connectClient(pingResult.version);
+            const activeVersion = pingResult.version || TARGET_VERSION;
+            connectClient(currentPort, activeVersion);
         })
         .catch((err) => {
-            console.error(`[Ping Failed] Could not ping ${HOST}:${PORT_MC}.`);
-            console.error(`Reason: ${err.message}`);
-            console.error(`Ensure your Aternos server is ONLINE (Green Status).`);
-            scheduleReconnect(15000);
+            console.error(`[Ping Failed] Target ${HOST}:${currentPort} unreachable (${err.message}).`);
+            
+            // Cycle through fallback ports
+            currentPortIndex = (currentPortIndex + 1) % FALLBACK_PORTS.length;
+            console.log(`[Fallback] Switching port index to try ${FALLBACK_PORTS[currentPortIndex]} next...`);
+            
+            scheduleReconnect(10000);
         });
 }
 
-function connectClient(serverVersion) {
+function connectClient(port, serverVersion) {
     try {
         client = bedrock.createClient({
             host: HOST,
-            port: PORT_MC,
+            port: port,
             username: BOT_NAME,
             offline: true,
-            skipPing: true,               // Prevents double-pinging or fallback overrides
-            version: serverVersion,        // Auto-sets to whatever version the server requested
-            raknetBackend: 'jsp-raknet',   // Pure JS backend for Render compatibility
+            skipPing: true,
+            version: serverVersion,
+            raknetBackend: 'jsp-raknet',
             connectTimeout: 30000,
             skinData: generateWhiteDuckSkin()
         });
 
-        // Event Handlers
         client.on('connect', () => {
-            console.log("[RakNet] Handshake established.");
+            console.log("[RakNet] Handshake established successfully.");
         });
 
         client.on('join', () => {
-            console.log(`🎉 [SUCCESS] ${BOT_NAME} connected to server!`);
+            console.log(`🎉 [SUCCESS] ${BOT_NAME} joined ${HOST}:${port}!`);
+            // Reset port index to primary upon successful join
+            currentPortIndex = 0;
         });
 
         const permShortcuts = loadPermanentCommands();
@@ -145,7 +157,6 @@ function connectClient(serverVersion) {
         const nearbyPlayers = new Map();
         const nearbyMobs = new Map();
         let priorityTarget = 'pixelbrine';
-        let isSneaking = false;
 
         client.on('spawn', () => {
             console.log(`[+] ${BOT_NAME} spawned into the world!`);
@@ -163,7 +174,7 @@ function connectClient(serverVersion) {
             nearbyMobs.delete(p.entity_unique_id);
         });
 
-        // Chat & Commands
+        // Command Processing
         client.on('text', (packet) => {
             if (packet.source_name === BOT_NAME) return;
             const rawMsg = (packet.message || '').trim();
@@ -197,7 +208,7 @@ function connectClient(serverVersion) {
                 if (sc && fullCmd) {
                     permShortcuts.set(sc, fullCmd);
                     savePermanentCommands(permShortcuts);
-                    sendChat(client, `[PERM] Shortcut '${sc}' saved to disk!`);
+                    sendChat(client, `[PERM] Shortcut '${sc}' saved.`);
                 }
                 return;
             }
@@ -208,7 +219,7 @@ function connectClient(serverVersion) {
                 const fullCmd = parts.slice(3).join(' ');
                 if (sc && fullCmd) {
                     tempShortcuts.set(sc, fullCmd);
-                    sendChat(client, `[TEMP] Shortcut '${sc}' active until restart.`);
+                    sendChat(client, `[TEMP] Shortcut '${sc}' activated.`);
                 }
                 return;
             }
@@ -231,7 +242,7 @@ function connectClient(serverVersion) {
             }
 
             if (cleanMsg === `*${BOT_NAME.toLowerCase()} guide1`) {
-                sendChat(client, `[Guide 1/3] Actions: *${BOT_NAME} afk!11 | afk<x,y,z>!11 | kill<target>!11 | mine<dir>!11 | 0 (Stop)`);
+                sendChat(client, `[Guide 1/3] Actions: *${BOT_NAME} afk!11 | afk<x,y,z>!11 | kill<target>!11 | mine<dir>!11 | 0`);
                 return;
             }
             if (cleanMsg === `*${BOT_NAME.toLowerCase()} guide2`) {
@@ -334,7 +345,6 @@ function connectClient(serverVersion) {
                     sendChat(client, `Attacking ${target}...`);
                     actionInterval = setInterval(() => {
                         sendAttack(pData.id);
-                        if (careful) setSneak(true);
                     }, 600);
                 } else {
                     sendChat(client, `Target '${target}' not found nearby.`);
@@ -383,27 +393,17 @@ function connectClient(serverVersion) {
             });
         }
 
-        function setSneak(enable) {
-            isSneaking = enable;
-            client.queue('player_auth_input', {
-                pitch: 0, yaw: 0, position: { x: 0, y: 0, z: 0 }, move_vector: { x: 0, z: 0 }, head_yaw: 0,
-                input_data: { sneaking: isSneaking, sprinting: false },
-                input_mode: 'touch', play_mode: 'normal', interaction_model: 'touch'
-            });
-        }
-
-        // Global Error / Disconnect Handling
         client.on('error', (err) => {
-            console.error('[Client Error Caught]:', err.message);
+            console.error('[Client Error]:', err.message);
         });
 
         client.on('close', (reason) => {
-            console.log(`[Disconnect] Server closed connection. Reason: ${reason || 'Unknown'}`);
+            console.log(`[Disconnect] Closed: ${reason || 'Server offline or port changed'}`);
             scheduleReconnect(15000);
         });
 
         client.on('end', (reason) => {
-            console.log(`[End] Connection ended. Reason: ${reason || 'Unknown'}`);
+            console.log(`[End] Ended: ${reason || 'Connection lost'}`);
             scheduleReconnect(15000);
         });
 
@@ -443,7 +443,7 @@ function scheduleReconnect(delayMs) {
     setTimeout(startBot, delayMs);
 }
 
-// Unhandled Crash Prevention
+// Unhandled Exception Prevention
 process.on('uncaughtException', (err) => {
     console.error('[Uncaught Exception Suppressed]:', err.message);
 });
@@ -452,5 +452,5 @@ process.on('unhandledRejection', (reason) => {
     console.error('[Unhandled Rejection Suppressed]:', reason);
 });
 
-// Kick off
+// Start service
 startBot();
