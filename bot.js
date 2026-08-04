@@ -4,7 +4,7 @@ const path = require('path');
 const express = require('express');
 const dns = require('dns').promises;
 
-// --- 1. RENDER HEALTH CHECK SERVER (For Uptime Robot) ---
+// --- 1. RENDER HEALTH CHECK SERVER (For Uptime Robot 24/7) ---
 const app = express();
 const PORT_WEB = process.env.PORT || 10000;
 
@@ -121,14 +121,14 @@ async function startBot() {
     stopAll();
 
     const target = await resolveAternosServer(ATERNOS_SERVER_NAME);
-    console.log(`\n[Attempting Connection] Target: ${target.host}:${target.port} | Bot: ${BOT_NAME}`);
+    console.log(`\n[Attempting Connection] Target: ${target.host}:${target.port} | Bot Mode: Xbox Live Online`);
 
     try {
         const pingResult = await bedrock.ping({ host: target.host, port: target.port, timeout: 5000 });
         console.log(`[Ping] Server Version: ${pingResult.version}`);
         
         reconnectAttempts = 0; 
-        connectClient(target.host, target.port, resolveBestSupportedVersion(pingResult.version));
+        connectClient(target.host, target.port, pingResult.version);
     } catch (err) {
         console.error(`[Ping Failed] Server offline or unreachable.`);
         triggerBackoffReconnect();
@@ -138,8 +138,12 @@ async function startBot() {
 function connectClient(host, port, serverVersion) {
     try {
         client = bedrock.createClient({
-            host: host, port: port, username: BOT_NAME, offline: true, skipPing: true,
-            version: serverVersion, raknetBackend: 'jsp-raknet', connectTimeout: 30000,
+            host: host, 
+            port: port, 
+            offline: false,     // REQUIRED: Authenticates with Xbox Live for achievements
+            skipPing: true,
+            version: serverVersion,
+            connectTimeout: 30000,
             skinData: generateWhiteDuckSkin()
         });
 
@@ -311,7 +315,7 @@ function connectClient(host, port, serverVersion) {
                 }
 
                 actionInterval = setInterval(() => {
-                    if (!client) return stopAll(); // Anti-crash check
+                    if (!client) return stopAll();
                     const enemy = nearbyPlayers.get(priorityTarget);
                     if (enemy) { sendAttack(enemy.id); return; }
 
@@ -330,7 +334,7 @@ function connectClient(host, port, serverVersion) {
                 if (pData) {
                     sendChat(`Attacking ${target}...`);
                     actionInterval = setInterval(() => {
-                        if (!client) return stopAll(); // Anti-crash check
+                        if (!client) return stopAll();
                         sendAttack(pData.id);
                     }, 600);
                 } else {
@@ -339,7 +343,7 @@ function connectClient(host, port, serverVersion) {
             } else if (action === 'mine') {
                 sendChat(`Mining (Safe Mode: ${careful}).`);
                 actionInterval = setInterval(() => {
-                    if (!client) return stopAll(); // Anti-crash check
+                    if (!client) return stopAll();
                     try {
                         client.queue('player_auth_input', {
                             pitch: 0, yaw: 0, position: { x: 0, y: 0, z: 0 },
@@ -380,10 +384,9 @@ function connectClient(host, port, serverVersion) {
             if (!client) return;
             try {
                 client.queue('text', { type: 'chat', needs_translation: false, source_name: BOT_NAME, xuid: '', platform_chat_id: '', filtered_message: '', message: text });
-            } catch (e) { console.error("Failed to send chat message:", e.message); }
+            } catch (e) {}
         }
 
-        // Network Safety Events
         client.on('error', (err) => { console.error('[Client Error]:', err.message); });
         client.on('disconnect', (packet) => { console.log(`[Kicked]: ${packet.message}`); triggerBackoffReconnect(); });
         client.on('close', () => { console.log(`[Closed]: Connection terminated.`); triggerBackoffReconnect(); });
@@ -404,7 +407,6 @@ function triggerBackoffReconnect() {
     isConnecting = false;
     if (client) { try { client.close(); } catch (e) {} client = null; }
     
-    // Exponential backoff to prevent Aternos IP-bans (Caps at ~1 minute)
     reconnectAttempts++;
     const delayMs = Math.min(15000 * Math.pow(1.5, reconnectAttempts - 1), 60000); 
     
@@ -412,7 +414,6 @@ function triggerBackoffReconnect() {
     setTimeout(startBot, delayMs);
 }
 
-// Global Crash Suppressors (Last Resort)
 process.on('uncaughtException', (err) => { console.error('[Fatal Suppressed]:', err.message); });
 process.on('unhandledRejection', (reason) => { console.error('[Promise Suppressed]:', reason); });
 
