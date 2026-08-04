@@ -20,14 +20,14 @@ app.listen(PORT_WEB, () => {
 const ATERNOS_SERVER_NAME = process.env.MC_HOST ? process.env.MC_HOST.replace('.aternos.me', '') : 'piximc';
 const BOT_NAME = process.env.MC_USERNAME || 'pixi';
 const STORAGE_FILE = path.join(__dirname, 'commands.json');
-const DEFAULT_VERSION = '1.21.60'; 
+const DEFAULT_VERSION = '1.26.30'; 
 
 let client = null;
 let isConnecting = false;
 let actionInterval = null;
 let reconnectAttempts = 0;
 
-// --- 3. BULLETPROOF VERSION ENGINE ---
+// --- 3. BULLETPROOF VERSION ENGINE (Fixed for 26.33 format) ---
 function resolveBestSupportedVersion(serverVersionString) {
     try {
         let supportedVersions = [];
@@ -39,13 +39,20 @@ function resolveBestSupportedVersion(serverVersionString) {
         }
         
         if (!supportedVersions || supportedVersions.length === 0) return DEFAULT_VERSION;
-        if (supportedVersions.includes(serverVersionString)) return serverVersionString;
 
-        const majorMinor = serverVersionString.split('.').slice(0, 2).join('.');
+        // Fix raw versions like '26.33' to '1.26.33'
+        let cleanVersion = serverVersionString;
+        if (!cleanVersion.startsWith('1.')) {
+            cleanVersion = '1.' + cleanVersion;
+        }
+
+        if (supportedVersions.includes(cleanVersion)) return cleanVersion;
+
+        const majorMinor = cleanVersion.split('.').slice(0, 2).join('.');
         const matchingFamily = supportedVersions.filter(v => v.startsWith(majorMinor));
-        if (matchingFamily.length > 0) return matchingFamily[matchingFamily.length - 1];
+        if (matchingFamily.length > 0) return matchingFamily[0]; 
 
-        return supportedVersions[supportedVersions.length - 1];
+        return supportedVersions[0];
     } catch (err) {
         console.warn(`[Version Engine] Failed to parse versions. Defaulting to ${DEFAULT_VERSION}`);
         return DEFAULT_VERSION;
@@ -127,8 +134,11 @@ async function startBot() {
         const pingResult = await bedrock.ping({ host: target.host, port: target.port, timeout: 5000 });
         console.log(`[Ping] Server Version: ${pingResult.version}`);
         
+        const resolvedVersion = resolveBestSupportedVersion(pingResult.version);
+        console.log(`[Version Match] Using protocol version: ${resolvedVersion}`);
+
         reconnectAttempts = 0; 
-        connectClient(target.host, target.port, pingResult.version);
+        connectClient(target.host, target.port, resolvedVersion);
     } catch (err) {
         console.error(`[Ping Failed] Server offline or unreachable.`);
         triggerBackoffReconnect();
@@ -193,7 +203,6 @@ function connectClient(host, port, serverVersion) {
                 return;
             }
 
-            // Shortcut Management
             if (cleanMsg.startsWith(`*${BOT_NAME.toLowerCase()} perm`)) {
                 const parts = rawMsg.split(' ');
                 const sc = parts[2] ? parts[2].toLowerCase() : '';
@@ -234,7 +243,6 @@ function connectClient(host, port, serverVersion) {
                 return;
             }
 
-            // Guides
             if (cleanMsg === `*${BOT_NAME.toLowerCase()} guide1`) {
                 sendChat(`[Guide 1/3] Actions: *${BOT_NAME} afk!11 | afk<x,y,z>!11 | kill<target>!11 | mine<dir>!11 | 0`);
                 return;
@@ -248,7 +256,6 @@ function connectClient(host, port, serverVersion) {
                 return;
             }
 
-            // Core Command Parsing
             const cmdBody = rawMsg.substring(1);
             const targetBot = cmdBody.startsWith(BOT_NAME.toLowerCase()) ? BOT_NAME.toLowerCase() : (cmdBody.startsWith('all') ? 'all' : null);
             if (!targetBot) return;
