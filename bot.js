@@ -9,7 +9,7 @@ const app = express();
 const PORT_WEB = process.env.PORT || 10000;
 
 app.get('/', (req, res) => {
-    res.status(200).send('Pixi Bedrock Bot is running successfully!');
+    res.status(200).send('Pixi Bedrock Bot is online and ready!');
 });
 
 app.listen(PORT_WEB, () => {
@@ -19,19 +19,48 @@ app.listen(PORT_WEB, () => {
 // --- 2. CONFIGURATION ---
 const ATERNOS_SERVER_NAME = process.env.MC_HOST ? process.env.MC_HOST.replace('.aternos.me', '') : 'piximc';
 const BOT_NAME = process.env.MC_USERNAME || 'pixi';
-const TARGET_VERSION = '1.26.36.1';
 const STORAGE_FILE = path.join(__dirname, 'commands.json');
 
 let client = null;
 let isConnecting = false;
 let actionInterval = null;
 
+// Dynamically inspect supported bedrock-protocol versions at runtime
+function resolveBestSupportedVersion(serverVersionString) {
+    const supportedVersions = Object.keys(bedrock.Versions || {});
+    
+    if (supportedVersions.length === 0) {
+        console.warn("[Version Engine] Could not read supported versions. Using default fallback.");
+        return '1.21.60';
+    }
+
+    // 1. Direct exact match
+    if (supportedVersions.includes(serverVersionString)) {
+        console.log(`[Version Engine] Exact protocol match found: ${serverVersionString}`);
+        return serverVersionString;
+    }
+
+    // 2. Patch version matching (e.g., if server is 1.21.62, match with 1.21.60)
+    const majorMinor = serverVersionString.split('.').slice(0, 2).join('.');
+    const matchingFamily = supportedVersions.filter(v => v.startsWith(majorMinor));
+    
+    if (matchingFamily.length > 0) {
+        const bestMatch = matchingFamily[matchingFamily.length - 1];
+        console.log(`[Version Engine] Matched family version ${serverVersionString} -> ${bestMatch}`);
+        return bestMatch;
+    }
+
+    // 3. Fallback to highest supported version in bedrock-protocol
+    const highestSupported = supportedVersions[supportedVersions.length - 1];
+    console.warn(`[Version Engine] Server version '${serverVersionString}' is outside known bounds. Using highest supported: ${highestSupported}`);
+    return highestSupported;
+}
+
 // Dynamically resolve target IP and active UDP port from Aternos DynIP
 async function resolveAternosServer(serverName) {
-    const dynIpHost = `add.aternos.org`;
     const fullHost = `${serverName}.aternos.me`;
 
-    // 1. Resolve SRV record (_minecraft._udp.piximc.aternos.me)
+    // Try resolving SRV record (_minecraft._udp.piximc.aternos.me)
     try {
         const srvRecords = await dns.resolveSrv(`_minecraft._udp.${fullHost}`);
         if (srvRecords && srvRecords.length > 0) {
@@ -39,15 +68,13 @@ async function resolveAternosServer(serverName) {
             return { host: srvRecords[0].name || fullHost, port: srvRecords[0].port };
         }
     } catch (e) {
-        // Fallthrough if SRV query fails or is unsupported
+        // Fallthrough if SRV query fails
     }
 
-    // 2. Resolve Dynamic IP record via add.aternos.org lookup
+    // Resolve Dynamic IP record
     try {
         const addresses = await dns.lookup(fullHost);
         console.log(`[Auto-Detect] Resolved ${fullHost} to IP: ${addresses.address}`);
-        
-        // Use default fallback port if SRV is absent
         const fallbackPort = parseInt(process.env.MC_PORT) || 43180;
         return { host: addresses.address, port: fallbackPort };
     } catch (err) {
@@ -126,26 +153,24 @@ async function startBot() {
     isConnecting = true;
     stopAll();
 
-    // Auto-detect connection endpoint dynamically
     const connectionTarget = await resolveAternosServer(ATERNOS_SERVER_NAME);
 
     console.log(`\n--------------------------------------------------`);
     console.log(`[Attempting Connection] Target: ${connectionTarget.host}:${connectionTarget.port}`);
-    console.log(`[Target Version]: ${TARGET_VERSION}`);
     console.log(`[Bot Name]: ${BOT_NAME}`);
     console.log(`--------------------------------------------------\n`);
 
-    // Ping probe before joining
     bedrock.ping({ host: connectionTarget.host, port: connectionTarget.port, timeout: 5000 })
         .then((pingResult) => {
-            console.log(`[Ping Success] Server MOTD: ${pingResult.motd}`);
-            console.log(`[Ping Success] Server Protocol/Version: ${pingResult.version}`);
+            console.log(`[Ping Success] MOTD: ${pingResult.motd}`);
+            console.log(`[Ping Success] Server Version: ${pingResult.version}`);
 
-            const activeVersion = pingResult.version || TARGET_VERSION;
+            // Automatically pick best supported protocol version
+            const activeVersion = resolveBestSupportedVersion(pingResult.version || '1.21.60');
             connectClient(connectionTarget.host, connectionTarget.port, activeVersion);
         })
         .catch((err) => {
-            console.error(`[Ping Failed] Target ${connectionTarget.host}:${connectionTarget.port} unreachable (${err.message}).`);
+            console.error(`[Ping Failed] ${connectionTarget.host}:${connectionTarget.port} unreachable (${err.message}).`);
             console.log(`Ensure your Aternos server is ONLINE (Green Status). Retrying in 15 seconds...`);
             scheduleReconnect(15000);
         });
@@ -185,7 +210,6 @@ function connectClient(host, port, serverVersion) {
             sendChat(client, `${BOT_NAME} online! Type '*${BOT_NAME} guide1' for help.`);
         });
 
-        // Entity Tracking
         client.on('add_player', (p) => nearbyPlayers.set(p.username.toLowerCase(), { id: p.runtime_id, pos: p.position }));
         client.on('add_actor', (m) => nearbyMobs.set(m.runtime_id, { type: m.type, pos: m.position }));
         client.on('remove_actor', (p) => {
@@ -195,7 +219,6 @@ function connectClient(host, port, serverVersion) {
             nearbyMobs.delete(p.entity_unique_id);
         });
 
-        // Command Processing
         client.on('text', (packet) => {
             if (packet.source_name === BOT_NAME) return;
             const rawMsg = (packet.message || '').trim();
